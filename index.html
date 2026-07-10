@@ -210,7 +210,17 @@
                 if(!response.ok) throw new Error("Time blocked");
                 const data = await response.json();
                 state.timeOffset = new Date(data.datetime).getTime() - Date.now();
-            } catch(e) { console.warn("Using local clock."); }
+            // NEW: Agar Server time mila, toh Clock ko GREEN kar do
+                elements.clock.classList.remove('text-gray-500');
+                elements.clock.classList.add('text-green-600');
+                elements.clock.title = "Secure Server Time"; // Hover karne par ye likha aayega
+            } catch(e) { console.warn("Using local clock.");
+                // NEW: Agar Local time use hua, toh Clock ko NORMAL (Gray) hi rakho
+                elements.clock.classList.remove('text-green-600');
+                elements.clock.classList.add('text-gray-500');
+                elements.clock.title = "Local Device Time";
+                       
+            }
         }
 
         function getSecureTime() { return new Date(Date.now() + state.timeOffset); }
