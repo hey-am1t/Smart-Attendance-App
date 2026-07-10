@@ -204,22 +204,63 @@
         };
         
         // --- TRUE TIME SYNC ---
+        // --- ADVANCED 4-TIER TRUE TIME SYNC ---
         async function syncTrueTime() {
+            let serverTime = null;
+            let timeSource = "";
+
+            // TIER 1: TimeAPI.io (Sabse fast aur reliable)
             try {
-                const response = await fetch('https://worldtimeapi.org/api/timezone/Asia/Kolkata');
-                if(!response.ok) throw new Error("Time blocked");
-                const data = await response.json();
-                state.timeOffset = new Date(data.datetime).getTime() - Date.now();
-            // NEW: Agar Server time mila, toh Clock ko GREEN kar do
+                const res1 = await fetch('https://timeapi.io/api/Time/current/zone?timeZone=Asia/Kolkata');
+                if (res1.ok) {
+                    const data = await res1.json();
+                    serverTime = new Date(data.dateTime).getTime();
+                    timeSource = "TimeAPI.io";
+                }
+            } catch(e) {}
+
+            // TIER 2: WorldTimeAPI (Agar Tier 1 fail ho jaye)
+            if (!serverTime) {
+                try {
+                    const res2 = await fetch('https://worldtimeapi.org/api/timezone/Asia/Kolkata');
+                    if (res2.ok) {
+                        const data = await res2.json();
+                        serverTime = new Date(data.datetime).getTime();
+                        timeSource = "WorldTimeAPI";
+                    }
+                } catch(e) {}
+            }
+
+            // TIER 3: Google Apps Script Server (Agar Tier 2 bhi fail ho jaye)
+            if (!serverTime) {
+                try {
+                    // Ye wahi GAS_URL hai jo aapne upar define kiya hua hai
+                    const res3 = await fetch(`${GAS_URL}?action=getServerTime`);
+                    if (res3.ok) {
+                        const json = await res3.json();
+                        if (json.status === 'success') {
+                            serverTime = new Date(json.data.timestamp).getTime();
+                            timeSource = "Google Server";
+                        }
+                    }
+                } catch(e) {}
+            }
+
+            // TIER 4: Final Validation & UI Update
+            if (serverTime) {
+                // Koi bhi 3 me se ek API chal gayi -> GREEN UI
+                state.timeOffset = serverTime - Date.now();
                 elements.clock.classList.remove('text-gray-500');
                 elements.clock.classList.add('text-green-600');
-                elements.clock.title = "Secure Server Time"; // Hover karne par ye likha aayega
-            } catch(e) { console.warn("Using local clock.");
-                // NEW: Agar Local time use hua, toh Clock ko NORMAL (Gray) hi rakho
+                elements.clock.title = `Secure Server Time (${timeSource})`; 
+                console.log(`[Time Sync] Success via ${timeSource}`);
+            } else {
+                // Teeno fail ho gaye (No Internet ya API block) -> GRAY UI
+                state.timeOffset = 0;
                 elements.clock.classList.remove('text-green-600');
                 elements.clock.classList.add('text-gray-500');
-                elements.clock.title = "Local Device Time";
-                       
+                elements.clock.title = "Local Device Time (Unverified)";
+                console.warn("[Time Sync] All servers failed. Using local device clock.");
             }
         }
 
