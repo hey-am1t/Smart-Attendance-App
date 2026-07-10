@@ -206,7 +206,7 @@
         // --- TRUE TIME SYNC ---
         async function syncTrueTime() {
             try {
-                const response = await fetch('http://worldtimeapi.org/api/timezone/Asia/Kolkata');
+                const response = await fetch('https://worldtimeapi.org/api/timezone/Asia/Kolkata');
                 if(!response.ok) throw new Error("Time blocked");
                 const data = await response.json();
                 state.timeOffset = new Date(data.datetime).getTime() - Date.now();
