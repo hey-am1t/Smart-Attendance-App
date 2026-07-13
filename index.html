@@ -204,53 +204,42 @@
         };
         
         // --- TRUE TIME SYNC ---
-        // --- ADVANCED 4-TIER TRUE TIME SYNC (WITH CACHE BUSTER FIX) ---
+       // --- STREAMLINED 3-TIER TRUE TIME SYNC ---
         async function syncTrueTime() {
             let serverTime = null;
             let timeSource = "";
             
-            // CRITICAL FIX: Prevent Browser & Service Worker from caching the old time
+            // Cache buster taaki browser hamesha fresh time laye
             const fetchOptions = { cache: 'no-store' }; 
             const cacheBuster = `&_t=${Date.now()}`;
 
-            // TIER 1: WorldTimeAPI (Best timezone parsing)
+            // TIER 1: Google Apps Script Server (Primary & Most Reliable)
             try {
-                const res1 = await fetch('https://worldtimeapi.org/api/timezone/Asia/Kolkata?nocache=' + Date.now(), fetchOptions);
+                const res1 = await fetch(`${GAS_URL}?action=getServerTime` + cacheBuster, fetchOptions);
                 if (res1.ok) {
-                    const data = await res1.json();
-                    serverTime = new Date(data.utc_datetime).getTime();
-                    timeSource = "WorldTimeAPI";
+                    const json = await res1.json();
+                    if (json.status === 'success') {
+                        // Google UTC time bhejta hai, hum offset add nahi karte kyunki Date object local timezone automatically handle karta hai
+                        serverTime = new Date(json.data.timestamp).getTime();
+                        timeSource = "Google Server";
+                    }
                 }
             } catch(e) {}
 
-            // TIER 2: TimeAPI.io (Fallback)
+            // TIER 2: TimeAPI.io (Backup)
             if (!serverTime) {
                 try {
                     const res2 = await fetch('https://timeapi.io/api/Time/current/zone?timeZone=Asia/Kolkata' + cacheBuster, fetchOptions);
                     if (res2.ok) {
                         const data = await res2.json();
-                        // Force IST timezone offset (+05:30) for perfect accuracy on all devices
+                        // Force IST timezone offset (+05:30)
                         serverTime = new Date(data.dateTime + "+05:30").getTime(); 
                         timeSource = "TimeAPI.io";
                     }
                 } catch(e) {}
             }
 
-            // TIER 3: Google Apps Script Server
-            if (!serverTime) {
-                try {
-                    const res3 = await fetch(`${GAS_URL}?action=getServerTime` + cacheBuster, fetchOptions);
-                    if (res3.ok) {
-                        const json = await res3.json();
-                        if (json.status === 'success') {
-                            serverTime = new Date(json.data.timestamp).getTime();
-                            timeSource = "Google Server";
-                        }
-                    }
-                } catch(e) {}
-            }
-
-            // TIER 4: Final Validation & UI Update
+            // TIER 3: Local Device Time (Last Fallback & UI Update)
             if (serverTime) {
                 state.timeOffset = serverTime - Date.now();
                 elements.clock.classList.remove('text-gray-500');
@@ -262,7 +251,7 @@
                 elements.clock.classList.remove('text-green-600');
                 elements.clock.classList.add('text-gray-500');
                 elements.clock.title = "Local Device Time (Unverified)";
-                console.warn("[Time Sync] All servers failed. Using local device clock.");
+                console.warn("[Time Sync] Servers failed. Using local device clock.");
             }
         }
         
