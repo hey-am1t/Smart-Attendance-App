@@ -54,11 +54,15 @@
                 <div id="video-loader" class="video-loader"></div>
                 <video id="camera-feed" autoplay playsinline class="w-full h-auto rounded-sm hidden"></video>
                 <canvas id="photo-canvas" class="hidden"></canvas>
-                <div class="absolute bottom-3 right-3 flex gap-3">
+                <!-- Camera Controls & Upload -->
+                <div class="absolute bottom-3 right-3 flex gap-3 z-10">
+                    <input type="file" id="manual-upload" accept="image/*" class="hidden">
+                    <button id="upload-btn" class="p-3 bg-white/60 hover:bg-white/80 backdrop-blur-sm rounded-full btn shadow-lg" title="Manual Upload (Admin Only)">📁</button>
                     <button id="recapture-btn" class="p-3 bg-white/60 backdrop-blur-sm rounded-full btn hidden" title="Re-capture Photo"></button>
                     <button id="torch-btn" class="p-3 bg-white/60 backdrop-blur-sm rounded-full btn hidden" title="Toggle Flash/Torch"></button>
                     <button id="switch-camera-btn" class="p-3 bg-white/60 backdrop-blur-sm rounded-full btn hidden" title="Switch Camera"></button>
                 </div>
+                
             </div>
             
             <div class="space-y-3 relative">
@@ -66,14 +70,20 @@
                     <label for="emp-id" class="block text-sm font-medium text-gray-700 mb-1">Employee ID</label>
                     <input type="text" id="emp-id" inputmode="numeric" placeholder="Loading instantly..." disabled class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 uppercase">
                 </div>
-                <div>
-                    <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                    <input type="text" id="name" placeholder="Auto-filled" readonly class="w-full px-4 py-2 border border-gray-300 rounded-lg">
-                </div>
-                <div class="hidden">
-                    <input type="text" id="department" readonly>
-                    <input type="text" id="designation" readonly>
-                </div>
+                <!-- PARALLEL GRID: FULL NAME & DESIGNATION -->
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label for="name" class="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wide">Full Name</label>
+                <input type="text" id="name" placeholder="Auto-filled" readonly class="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-gray-50 text-gray-800 font-semibold truncate outline-none transition-all">
+            </div>
+            <div>
+                <label for="designation" class="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wide">Designation</label>
+                <!-- Designation field ab hidden nahi hai -->
+                <input type="text" id="designation" placeholder="Designation" readonly class="w-full px-3 py-2.5 border border-indigo-200 rounded-lg bg-indigo-50 text-indigo-700 font-bold truncate outline-none shadow-inner transition-all">
+            </div>
+        </div>
+        <!-- Department can stay hidden as it might be needed for your backend script -->
+        <input type="hidden" id="department" readonly>
             </div>
 
             <div class="grid grid-cols-2 gap-4">
@@ -101,6 +111,20 @@
             <div class="grid grid-cols-2 gap-4 pt-2">
                 <button id="cancel-btn" class="w-full bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg btn">Cancel</button>
                 <button id="confirm-btn" class="w-full bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg btn">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADMIN PIN MODAL -->
+    <div id="pin-modal" class="modal-overlay hidden fade-in">
+        <div class="bg-white w-full max-w-xs rounded-xl shadow-2xl p-6 space-y-4 text-center">
+            <div class="text-3xl mb-2">🔒</div>
+            <h3 class="text-lg font-bold text-gray-800">Admin Override</h3>
+            <p class="text-xs text-gray-500">Enter 4-digit PIN for manual upload.</p>
+            <input type="password" id="admin-pin-input" maxlength="4" inputmode="numeric" class="w-full text-center text-2xl tracking-[1em] px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 outline-none">
+            <div class="grid grid-cols-2 gap-3 pt-2">
+                <button id="cancel-pin-btn" class="w-full bg-gray-200 text-gray-800 font-bold py-2 rounded-lg">Cancel</button>
+                <button id="verify-pin-btn" class="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg">Verify</button>
             </div>
         </div>
     </div>
@@ -187,12 +211,16 @@
             pendingList: document.getElementById('pending-list'), leaveModal: document.getElementById('leave-modal'),
             closeLeaveModalBtn: document.getElementById('close-leave-modal-btn'), leaveForm: document.getElementById('leave-form'),
             submitLeaveBtn: document.getElementById('submit-leave-btn'),
+            uploadBtn: document.getElementById('upload-btn'), manualUpload: document.getElementById('manual-upload'),
+            pinModal: document.getElementById('pin-modal'), adminPinInput: document.getElementById('admin-pin-input'),
+            cancelPinBtn: document.getElementById('cancel-pin-btn'), verifyPinBtn: document.getElementById('verify-pin-btn')
         };
 
         const state = {
             employeeDatabase: [], videoDevices: [], currentDeviceIndex: 0, currentStream: null,
             isTorchSupported: false, isTorchOn: false, pendingAction: null, isFaceDetectionReady: false,
-            faceDetectionInterval: null, timeOffset: 0
+            faceDetectionInterval: null, timeOffset: 0,
+            isManualUpload: false, manualImageObj: null, adminPIN: '1234' // Changed: Added missing comma
         };
 
         const icons = {
@@ -340,40 +368,103 @@
             }
         }
 
+        // --- CONCEPT 1 UPDATED: AUTOCOMPLETE & RECENT HISTORY DROPDOWN ---
         function setupAutocomplete() {
             const input = elements.empIdInput;
             const box = document.createElement('div');
-            box.className = 'absolute bg-white border border-gray-300 rounded-lg shadow-md max-h-48 overflow-y-auto z-50 w-full left-0 top-16 hidden';
+            box.id = 'autocomplete-box';
+            box.className = 'absolute bg-white border border-gray-300 rounded-xl shadow-xl max-h-52 overflow-y-auto z-50 w-full left-0 top-14 hidden border-t-2 border-t-indigo-500';
             input.parentNode.appendChild(box);
 
-            input.addEventListener('input', () => {
-                const q = input.value.trim().toUpperCase();
-                box.innerHTML = '';
-                if (!q) return box.classList.add('hidden');
-                const matches = state.employeeDatabase.filter(e => e.EmployeeID.toUpperCase().includes(q)).slice(0, 5);
-                if (!matches.length) return box.classList.add('hidden');
-
-                matches.forEach(emp => {
-                    const opt = document.createElement('div');
-                    opt.className = 'px-3 py-2 cursor-pointer hover:bg-indigo-50 text-sm border-b last:border-0';
-                    opt.innerHTML = `<span class="font-bold">${emp.EmployeeID}</span> - ${emp.FullName}`;
-                    opt.addEventListener('click', () => { input.value = emp.EmployeeID; handleIdInput(); box.classList.add('hidden'); });
-                    box.appendChild(opt);
-                });
-                box.classList.remove('hidden');
-            });
-            document.addEventListener('click', e => { if (!input.parentNode.contains(e.target)) box.classList.add('hidden'); });
+        // 1. Jab User Click Kare (Focus) - Show Recent History (Agar Box Khali Ho)
+        input.addEventListener('focus', () => {
+        const q = input.value.trim().toUpperCase();
+        if (!q) {
+            showRecentDropdown(box, input);
         }
+        });
+
+        // 2. Jab User Type Kare (Input) - Live Search Database
+        input.addEventListener('input', () => {
+        const q = input.value.trim().toUpperCase();
+        box.innerHTML = '';
+        if (!q) {
+            showRecentDropdown(box, input); // Type mita diya toh wapas Recent History dikhao
+            return;
+        }
+        
+        const matches = state.employeeDatabase.filter(e => e.EmployeeID.toUpperCase().includes(q)).slice(0, 5);
+        if (!matches.length) return box.classList.add('hidden');
+
+        matches.forEach(emp => {
+            const opt = document.createElement('div');
+            opt.className = 'px-3 py-2.5 cursor-pointer hover:bg-indigo-50 text-sm border-b last:border-0 flex justify-between items-center transition-colors';
+            opt.innerHTML = `<div><span class="font-bold text-indigo-600">${emp.EmployeeID}</span> <span class="text-gray-700 font-medium"> - ${emp.FullName}</span></div>`;
+            opt.addEventListener('click', () => { 
+                input.value = emp.EmployeeID; 
+                handleIdInput(); 
+                box.classList.add('hidden'); 
+            });
+            box.appendChild(opt);
+        });
+        box.classList.remove('hidden');
+    });
+
+    // Outside Click par Box Hide kar do
+    document.addEventListener('click', e => { 
+        if (!input.parentNode.contains(e.target)) box.classList.add('hidden'); 
+    });
+}
+
+// Recent History Render karne ka Helper Function
+function showRecentDropdown(box, input) {
+    const recent = JSON.parse(localStorage.getItem('attendify_recent_ids') || '[]');
+    box.innerHTML = '';
+    
+    if (recent.length === 0) return box.classList.add('hidden');
+
+    // Header Label
+    const header = document.createElement('div');
+    header.className = 'px-3 py-1.5 text-[11px] font-bold text-gray-400 uppercase bg-gray-50 border-b flex justify-between items-center tracking-wider';
+    header.innerHTML = `<span>🕒 Recent History</span><span class="text-[9px] text-gray-400 lowercase font-normal">(Tap to fill)</span>`;
+    box.appendChild(header);
+
+    recent.forEach(item => {
+        const opt = document.createElement('div');
+        opt.className = 'px-3 py-2 cursor-pointer hover:bg-indigo-50 text-sm border-b last:border-0 flex justify-between items-center transition-colors';
+        opt.innerHTML = `
+            <span class="font-bold text-gray-800">${item.id}</span>
+            <span class="text-xs text-indigo-600 font-medium bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">${item.name}</span>
+        `;
+        opt.addEventListener('click', () => {
+            input.value = item.id;
+            handleIdInput();
+            box.classList.add('hidden');
+        });
+        box.appendChild(opt);
+    });
+    box.classList.remove('hidden');
+}
 
         function handleIdInput() {
             const id = elements.empIdInput.value.trim().toUpperCase();
             const emp = state.employeeDatabase.find(e => e.EmployeeID === id);
+            
+            // Ab hume designation field ko bhi target karna hai
+            const designationInput = document.getElementById('designation');
+            
             if (emp) {
                 elements.nameInput.value = emp.FullName;
+                
+                // Assuming aapke database/Google Sheet column ka naam "Designation" hai
+                // Agar aapki sheet me column ka naam kuch aur hai (jaise 'Role'), toh yahan change kar lijiye
+                designationInput.value = emp.Designation || "Employee"; 
+                
                 elements.applyLeaveBtn.disabled = false;
                 if(elements.video.paused) { elements.inBtn.disabled = false; elements.outBtn.disabled = false; }
             } else {
                 elements.nameInput.value = '';
+                designationInput.value = '';
                 elements.applyLeaveBtn.disabled = true; elements.inBtn.disabled = true; elements.outBtn.disabled = true;
             }
         }
@@ -389,9 +480,15 @@
             try {
                 const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, () => rej(new Error("Location needed")), { enableHighAccuracy: true }));
                 
+                // Changed: Moved canvas drawing here BEFORE creating payload
                 const ctx = elements.canvas.getContext('2d');
-                elements.canvas.width = elements.video.videoWidth; elements.canvas.height = elements.video.videoHeight;
-                ctx.drawImage(elements.video, 0, 0);
+                if (state.isManualUpload && state.manualImageObj) {
+                    elements.canvas.width = state.manualImageObj.width; elements.canvas.height = state.manualImageObj.height;
+                    ctx.drawImage(state.manualImageObj, 0, 0);
+                } else {
+                    elements.canvas.width = elements.video.videoWidth; elements.canvas.height = elements.video.videoHeight;
+                    ctx.drawImage(elements.video, 0, 0);
+                }
 
                 const now = getSecureTime();
                 ctx.font = 'bold 20px Inter'; ctx.fillStyle = 'white'; ctx.shadowColor = 'black'; ctx.shadowBlur = 5;
@@ -403,14 +500,22 @@
                     empId: elements.empIdInput.value, name: elements.nameInput.value,
                     status: status, clientTimestamp: now.toISOString(),
                     latitude: pos.coords.latitude, longitude: pos.coords.longitude,
-                    imageData: elements.canvas.toDataURL('image/jpeg', 0.8).split(',')[1]
+                    imageData: elements.canvas.toDataURL('image/jpeg', 0.8).split(',')[1], // Changed: Added missing comma
+                    isManual: state.isManualUpload ? "Yes" : "No"
                 };
 
                 if (navigator.onLine) {
                     const resp = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(payload), redirect: 'follow' });
                     const res = await resp.json();
-                    if (res.status === 'success') showStatus("Attendance Marked!", "success");
-                    else throw new Error(res.message);
+                    
+                    if (res.status === 'success') {
+                        // Save last action in memory to prevent Double Entry spam
+                        localStorage.setItem('last_entry_' + elements.empIdInput.value.toUpperCase(), JSON.stringify({ action: status, time: Date.now() }));
+                        showStatus("Attendance Marked!", "success");
+                        if (navigator.vibrate) navigator.vibrate([50, 100, 50]); // Success pattern vibration
+                        // CONCEPT 1: Save ID & Name to history on successful attendance
+                        saveToRecentIDs(elements.empIdInput.value.trim().toUpperCase(), elements.nameInput.value);
+                    } else throw new Error(res.message);
                 } else {
                     await dbPut(payload);
                     showStatus("Saved offline!", "info");
@@ -421,7 +526,13 @@
                 showStatus(err.message, "error"); 
                 alert("Action Failed: " + err.message); 
             }
-            finally { btn.innerHTML = status; recapture(); }
+            
+            finally { 
+                btn.innerHTML = status; 
+                recapture(); 
+                // Auto focus back to input for the next person
+                setTimeout(() => elements.empIdInput.focus(), 500);
+            }
         }
 
         // --- CAMERA SCRIPT REPLACEMENT ---
@@ -537,6 +648,7 @@
                 
                 if (detect.length === 1) {
                     elements.video.pause();
+                    if (navigator.vibrate) navigator.vibrate(100); // Single short vibration on face lock
                     elements.faceDetectionStatus.textContent = "Face Detected!";
                     elements.faceDetectionStatus.className = "text-center text-sm font-medium p-2 rounded-lg bg-green-100 text-green-700";
                     elements.recaptureBtn.classList.remove('hidden');
@@ -555,6 +667,10 @@
             elements.faceDetectionStatus.textContent = "Looking for a face...";
             elements.faceDetectionStatus.className = "text-center text-sm font-medium p-2 rounded-lg bg-blue-100 text-blue-700";
             startFaceDetection();
+            elements.empIdInput.focus();
+            state.isManualUpload = false; state.manualImageObj = null;
+            elements.canvas.classList.add('hidden'); elements.video.classList.remove('hidden');
+            elements.manualUpload.value = ""; // Changed: Clears the uploaded file to allow re-uploading the same file if needed
         }
 
         // --- OFFLINE SYNC BOX ---
@@ -563,6 +679,28 @@
             elements.syncText.textContent = queue.length > 0 ? `Pending: ${queue.length}` : "Synced";
             elements.syncText.className = queue.length > 0 ? "text-yellow-600" : "text-green-600";
         }
+
+// --- CONCEPT 1: SAVE RECENT EMPLOYEE TO LOCALSTORAGE ---
+function saveToRecentIDs(empId, name) {
+    if (!empId || !name) return;
+    try {
+        let recent = JSON.parse(localStorage.getItem('attendify_recent_ids') || '[]');
+        
+        // Agar ID pehle se list me hai toh purani wali hata do (Duplicate remove)
+        recent = recent.filter(item => item.id !== empId);
+        
+        // Naye record ko sabse upar (Start me) add karo
+        recent.unshift({ id: empId, name: name });
+        
+        // Max 5 recent items hi rakho
+        if (recent.length > 5) recent = recent.slice(0, 5);
+        
+        // LocalStorage me save kar do
+        localStorage.setItem('attendify_recent_ids', JSON.stringify(recent));
+    } catch(e) {
+        console.warn("Could not save to recent history:", e);
+    }
+}
 
         async function showPendingSyncs() {
             const queue = await dbGetAll();
@@ -651,9 +789,91 @@
             }
         });
 
+        // --- MANUAL UPLOAD & PIN LOGIC (Changed: Added missing code here) ---
+        elements.uploadBtn.onclick = () => {
+            elements.adminPinInput.value = '';
+            elements.pinModal.classList.remove('hidden');
+            setTimeout(() => elements.adminPinInput.focus(), 100);
+        };
+
+        elements.cancelPinBtn.onclick = () => elements.pinModal.classList.add('hidden');
+
+        elements.verifyPinBtn.onclick = () => {
+            if (elements.adminPinInput.value === state.adminPIN) {
+                elements.pinModal.classList.add('hidden');
+                elements.manualUpload.click(); // Open Gallery
+            } else {
+                alert("Incorrect PIN!");
+            }
+        };
+
+        elements.manualUpload.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = async () => {
+                    if (state.faceDetectionInterval) clearInterval(state.faceDetectionInterval);
+                    elements.video.pause(); elements.video.classList.add('hidden');
+                    
+                    elements.canvas.width = img.width; elements.canvas.height = img.height;
+                    const ctx = elements.canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, img.width, img.height);
+                    
+                    elements.canvas.classList.remove('hidden');
+                    state.isManualUpload = true; state.manualImageObj = img;
+
+                    elements.faceDetectionStatus.textContent = "Scanning uploaded photo...";
+                    elements.faceDetectionStatus.className = "text-center text-sm font-medium p-2 rounded-lg bg-yellow-100 text-yellow-700";
+
+                    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 });
+                    const detect = await faceapi.detectAllFaces(elements.canvas, options);
+
+                    if (detect.length >= 1) {
+                        elements.faceDetectionStatus.textContent = "Face Detected in Photo (Manual Override)!";
+                        elements.faceDetectionStatus.className = "text-center text-sm font-medium p-2 rounded-lg bg-indigo-100 text-indigo-700";
+                        elements.recaptureBtn.classList.remove('hidden');
+                        if (elements.empIdInput.value) { elements.inBtn.disabled = false; elements.outBtn.disabled = false; }
+                    } else {
+                        elements.faceDetectionStatus.textContent = "No face found. Try again.";
+                        elements.faceDetectionStatus.className = "text-center text-sm font-medium p-2 rounded-lg bg-red-100 text-red-700";
+                        elements.recaptureBtn.classList.remove('hidden');
+                    }
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        };
+
         // --- LISTENERS & INIT ---
-        elements.inBtn.onclick = () => { state.pendingAction = 'IN'; elements.confirmationModal.classList.remove('hidden'); elements.modalTitle.textContent = "Confirm IN"; };
-        elements.outBtn.onclick = () => { state.pendingAction = 'OUT'; elements.confirmationModal.classList.remove('hidden'); elements.modalTitle.textContent = "Confirm OUT"; };
+        // --- SMART DOUBLE ENTRY CHECKER ---
+        function handleActionClick(actionType) {
+            const empId = elements.empIdInput.value.trim().toUpperCase();
+            if(!empId) return;
+
+            // Check in LocalStorage for previous entry
+            const lastEntryStr = localStorage.getItem('last_entry_' + empId);
+            if (lastEntryStr) {
+                const lastEntry = JSON.parse(lastEntryStr);
+                const hoursDiff = (Date.now() - lastEntry.time) / (1000 * 60 * 60);
+                
+                // Agar pichle 12 ghante ke andar same entry lagane ki koshish ki
+                if (lastEntry.action === actionType && hoursDiff < 12) {
+                    showStatus(`Aapka ${actionType} already mark ho chuka hai!`, "error");
+                    return; // Stop right here!
+                }
+            }
+
+            // All clear, show confirmation
+            state.pendingAction = actionType; 
+            elements.confirmationModal.classList.remove('hidden'); 
+            elements.modalTitle.textContent = `Confirm ${actionType}`;
+        }
+
+        elements.inBtn.onclick = () => handleActionClick('IN');
+        elements.outBtn.onclick = () => handleActionClick('OUT');
         elements.cancelBtn.onclick = () => elements.confirmationModal.classList.add('hidden');
         elements.confirmBtn.onclick = executeAttendance;
         elements.recaptureBtn.onclick = recapture;
@@ -713,4 +933,3 @@
     </script>
 </body>
 </html>
-
